@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sentence-transformers
+transformers>=4.30.0
+nest_asyncio
+torch
+pyngrok
+faiss-cpu
+scikit-learn
+numpy
