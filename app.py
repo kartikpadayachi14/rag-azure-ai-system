@@ -6,20 +6,19 @@ from transformers import pipeline
 import faiss
 import numpy as np
 import nest_asyncio
-from pyngrok import ngrok
-import uvicorn
+
 
 #Allow nested loops 
 nest_asyncio.apply()
 
-#Initialize FastAPI
+
 app = FastAPI()
 
-#Initialize models
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-generator = pipeline("text-generation",model = "google/flan-t5-base")
 
-#documents
+embedding_model = None
+generator = None
+index = None
+
 documents = [
     "Azure Machine Learning allows deployment of models in the cloud.",
     "Transformers use attention mechanisms to process sequential data efficiently.",
@@ -48,100 +47,105 @@ documents = [
     "Scalable storage solutions are essential for big data applications."
 ]
 
-# After your imports
-# def chunk_text(text, chunk_size=200, overlap=50):
-  #  words = text.split()
- #   chunks = []
- #   for i in range(0, len(words), chunk_size - overlap):
- #       chunk = words[i:i + chunk_size]
-#        chunks.append(" ".join(chunk))
- #   return chunks
 
-#documents =[]
-#for doc in raw_documents:
-#   chunk_list = chunk_text(doc,chunk_size = 10, overlap = 2)
-#   documents.extend(chunk_list)
-
-#print(f"Total chunks created: {len(documents)}")
-#print(f"First chunk: {documents[0]}")
-
-doc_embeddings = embedding_model.encode(documents)
-doc_embeddings = np.array(doc_embeddings).astype("float32")
-
-dimension = doc_embeddings.shape[1]
-index = faiss.IndexFlatL2(dimension)
-index.add(doc_embeddings)
-
-
-   #for chunk in retrieved_chunks:
-    #  if expected_keyword.lower() in chunk.lower():
-     #    return 1
-    #return 0
 
 
 test_cases = [
     {"question": "How can I deploy ML models?", "expected_keyword": "Azure"},
-    {"question": "What is attention in transformers?", "expected_keyword": "attention"}
+    {"question": "What enables similarity search?", "expected_keyword": "Vector"},
+    {"question": "What improves predictive performance?", "expected_keyword": "Feature"},
+    {"question": "How do transformers process sequential data?", "expected_keyword": "attention"}
 ]
 
 def evaluate_retrieval(question, expected_keyword):
    query_embedding = embedding_model.encode([question])
    query_embedding = np.array(query_embedding).astype("float32")
-   distances, indices = index.search(query_embedding, k =3)
+
+   faiss.normalize_L2(query_embedding)
+
+   distances, indices = index.search(query_embedding, 5)
 
    retrieved_docs = [documents[i] for i in indices[0]]
-   print("\nEVALUATING QUESTION:", question)
+   print("\nQUESTION:", question)
    print("RETRIEVED DOCS:", retrieved_docs)
 
    for doc in retrieved_docs:
       if expected_keyword.lower() in doc.lower():
          return 1
+      
    return 0
 
-print("\n--- Running Retrieval Evaluation ---")
-score =0 
-for case in test_cases:
-   score += evaluate_retrieval(case["question"],case["expected_keyword"])
-
-print("\nRetrieval Accuracy:" ,score / len(test_cases))
 
 @app.get("/ask")
 def ask(question: str):
-  query_embedding = embedding_model.encode([question])
-  query_embedding = np.array(query_embedding).astype("float32")
+    global embedding_model, generator, index
 
-  distance, indices = index.search(query_embedding, 2)
-  retrieved_docs = [documents[i] for i in indices[0]]
-  context = " ".join(retrieved_docs)
+    try:
 
-  prompt = f"""
-  Answer the question using only the context below.
-  If the answer is not in the context, say "I don't know."
+        if embedding_model is None:
+            embedding_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
-  context:
-  {context}
+        if generator is None:
+            generator = pipeline(
+                "text2text-generation",
+                model="google/flan-t5-small",
+                device=-1
+            )
 
-  Question:{question}
-  """
+        if index is None:
+            doc_embeddings = embedding_model.encode(documents)
+            doc_embeddings = np.array(doc_embeddings).astype("float32")
 
-  response = generator(prompt, max_new_tokens=100)
+            faiss.normalize_L2(doc_embeddings)
 
-  answer = response[0]["generated_text"].strip()
+            dimension = doc_embeddings.shape[1]
+            index = faiss.IndexFlatIP(dimension)
+            index.add(doc_embeddings)
 
-  return {"answer": answer}
+            print("\n--- Running Retrieval Evaluation ---")
 
-  #return{"answer": response[0]['generated_text']}
+            score = 0
+            for case in test_cases:
+                score += evaluate_retrieval(case["question"], case["expected_keyword"])
 
-if __name__ == "__main__":
-   ngrok.set_auth_token("39nrON5sXnBO9LoEieiC5mg4xBg_5tDzV1v12v4tcKFwvBHtn")
+            print("Retrieval Accuracy:", score / len(test_cases))
 
-   public_url = ngrok.connect(8000)
-   print(f"\n✅ SUCCESS! Follow these steps:")
-   print(f"1. Open this link: {public_url.public_url}/docs")
-   print(f"2. Click 'GET /ask', then 'Try it out', then 'Execute'\n")
-   
-   uvicorn.run(app, host="0.0.0.0", port=8000)
-#config =uvicorn.Config(app, host="0.0.0.0", port=8000)
-#server = uvicorn.Server(config)
+        query_embedding = embedding_model.encode([question])
+        query_embedding = np.array(query_embedding).astype("float32")
 
-#asyncio.get_event_loop().create_task(server.serve())
+        faiss.normalize_L2(query_embedding)
+
+        distance, indices = index.search(query_embedding, 6)
+
+        retrieved_docs = [documents[i] for i in indices[0]]
+
+        # choose the most relevant docs
+        top_docs = retrieved_docs[:2]
+
+        print("\nQUESTION:", question)
+        print("TOP DOCS:", top_docs)
+
+        context = "\n".join(top_docs)
+
+        prompt = f"""
+You are a helpful assistant.
+
+Answer the question using ONLY the context.
+If the answer is not clearly stated, say "I don't know."
+
+context:
+{context}
+
+Question:
+{question}
+
+Return ONLY one short sentence as the answer:
+"""
+
+        
+        response = generator(prompt, max_new_tokens=80, do_sample=False)
+        answer = response[0]["generated_text"].strip()
+        return {"answer": answer}
+
+    except Exception as e:
+        return {"error": str(e)}
