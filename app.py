@@ -116,7 +116,9 @@ def ask(question: str):
         faiss.normalize_L2(query_embedding)
 
         distance, indices = index.search(query_embedding, 6)
-
+        if distance[0][0] < 0.4:
+             return {"answer": "I don't know"}
+        
         retrieved_docs = [documents[i] for i in indices[0]]
 
         # choose the most relevant docs
@@ -126,6 +128,7 @@ def ask(question: str):
         print("TOP DOCS:", top_docs)
 
         context = "\n".join(top_docs)
+        
 
         prompt = f"""
 You are a helpful assistant.
@@ -139,13 +142,14 @@ context:
 Question:
 {question}
 
-Return ONLY one short sentence as the answer:
+Answer:
 """
 
         
-        response = generator(prompt, max_new_tokens=80, do_sample=False)
+        response = generator(prompt, max_new_tokens=50, do_sample=False)
         answer = response[0]["generated_text"].strip()
         return {"answer": answer}
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e)})}
+
