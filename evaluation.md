@@ -7,9 +7,10 @@ Test Case 1: "How can I deploy ML models?" → Expected: "Azure"
 Test Case 2: "What is attention in transformers?" → Expected: "attention"
 
 * Performance Results
-Retrieval Accuracy: 100% (1.0)
-Search Metric: L2 Distance (Euclidean) via FAISS
-Latent Space: Using all-MiniLM-L6-v2 for 384-dimensional dense embeddings
+Using the test cases above, the system retrieves relevant documents containing the expected technical concepts.
+Typical retrieval accuracy observed during testing:
+Retrieval Accuracy: ~75–100% depending on query wording.
+Because the dataset contains only 25 technical documents, retrieval performance may vary for differently phrased questions.
 
 * Hallucination Reduction
 To ensure engineering depth and reliability, I implemented a Strict Grounding Prompt:
